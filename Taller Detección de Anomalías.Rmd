@@ -1,0 +1,210 @@
+---
+title: "Detección de Anomalías"
+date: "`r Sys.Date()`"
+author: " Lizeth Moreno"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+
+```{r include=FALSE}
+library(openxlsx)
+library(tidyverse)
+library(magrittr)
+library(Amelia)
+library(corrplot)
+library(psych)
+library(readxl)
+library(nortest)
+library(PCAmixdata)
+library(PerformanceAnalytics)
+library("factoextra")
+library("FactoMineR")
+library(Rlof)
+library(dbscan)
+library(scatterplot3d)
+library(FNN)
+library(cluster)
+library(normtest) ###REALIZA 5 PRUEBAS DE NORMALIDAD###
+library(nortest) ###REALIZA 10 PRUEBAS DE NORMALIDAD###
+library(moments) ###REALIZA 1 PRUEBA DE NORMALIDAD###
+
+```
+
+```{r include=FALSE}
+portantes_Fondo_original <- read_excel("Base de datos/Aportantes_Fondo.xlsx", 
+                              col_types = c("text", "text", "text", 
+                                            "date", "text", "date", "numeric", 
+                                            "numeric", "numeric", "numeric", 
+                                            "text", "numeric", "text","numeric",
+                                            "numeric"))
+
+
+portantes_Fondo<-portantes_Fondo_original %>% 
+  select(CODIGO,NOMBRE,SEXO,REMUNERACION_MES,FE_NAC,FE_ING_FONDO,
+         PC_APORTE,MONTO_APO,ESTADO_CIVIL,CATEGORIA,GENERO,CATEGORIA,E_CIVIL) %>% 
+  mutate(años=round((FE_ING_FONDO-FE_NAC)/365)) %>% 
+  mutate(SEXO=factor(SEXO)) %>% 
+  mutate(años=as.numeric(años)) %>% 
+  mutate(CATEGORIA=as.factor(CATEGORIA))
+#view(portantes_Fondo)
+#head(portantes_Fondo)
+portantes_Fondo_Anomalias<- portantes_Fondo %>% select(REMUNERACION_MES,PC_APORTE,años)
+```
+
+
+# Introducción 
+
+El término anomalia se define como una colección de puntos de datos que no siguen el mismo patrón o no tienen la misma estructura que el resto de los datos. El objetivo de los métodos de detección de anomalías es encontrar estas desviaciones y así poder identificar los comportamientos atípicos(Amat,2020). Entre los métodos para la detección de datos anómalos se encuentran los métodos supervisados, semi-supervisados y no supervisados. En este informe se hace uso del método LOF(Factor local atípico) en la detección de anomalías, el cual es un algoritmo propuesto por Markus M. Breuning para encontrar puntos de datos anómalos midiendo la desviación local de un punto de datos dado con respecto a sus vecinos.
+Por otro lado se realiza un análisis multivariante unicamente con las  variables cuantitativas de nuestros datos. 
+
+##Test de normalidad
+
+Es muy útil visualizar la distribución de nuestros valores, detectar posibles errores y realizar pruebas de normalidad de los datos antes de empezar con nuestro análisis. 
+
+En siguiente gráfico representa los datos de las variables frente a los datos esperados si la distribución fuera normal . Si los puntos están cerca de la diagonal podemos decir que la distribución es normal. De igual forma se podría obtener un histograma que nos ayude a visualizar.
+
+```{r echo=FALSE}
+#qqnormPlot(portantes_Fondo_Anomalias)
+par(mfrow=c(1,2))
+qqnorm(portantes_Fondo_Anomalias$REMUNERACION_MES)
+qqnorm(portantes_Fondo_Anomalias$PC_APORTE)
+qqnorm(portantes_Fondo_Anomalias$años)
+
+```
+
+Ahora, Con la ayuda del paquete "normtest"  se obtiene un test de normalidad que se utiliza mayormente para muestras pequeñas. Este test de normalidad se enfrenta a  una $H_{0}$= los datos provienen de una distribución normal VS $H_{a}$= No provienen de una distribución normal.
+
+```{r echo=FALSE}
+shapiro.test(portantes_Fondo_Anomalias$REMUNERACION_MES)
+shapiro.test(portantes_Fondo_Anomalias$PC_APORTE)
+shapiro.test(portantes_Fondo_Anomalias$años)
+```
+Estos resultados nos muestran no existe evidencia estadística para rechazar Ho. Es decir, podemos afirmar que nuestras variables tienen una distribución normal. 
+
+
+
+
+##Detección de Outliers: Técnicas multivariadas
+
+A partir de datos obtenidos previamente en el informe de ACP se obtuvo que las variables años, pc_aporte y remuneración mensual fueron las más influyentes en nuestro análisis, a partir de estos datos la siguiente gráfica nos muestra una nube de puntos tridimensionales que nos permite identificar a partir de las 3 variables influyentes los valores anómalos.
+```{r echo=FALSE, warning=FALSE}
+
+portantes_Fondo_Anomalias %>% scatterplot3d()
+
+```
+
+
+
+
+##Local Outlier Factor(LOF)
+
+Ahora abordamos, Local Outlier Factor que es una técnica multivariada. La idea de LOF será encontrar los outlieres de nuestra base datos basandose en un concepto de densidad local, dónde la localidad está dada por $k$ vecinos más cercanos, cuya distancia se usa para estimar la densidad.
+
+Estandarizamos nuestras columnas de la base de datos y calculamos el LOF.
+Así, se obtiene los primeros 5 valores anómalos de nuestra base portantes_fondo
+
+```{r echo=FALSE}
+
+portantes_Fondo_Anomalias1<- portantes_Fondo %>% select(REMUNERACION_MES,años,MONTO_APO,PC_APORTE)
+
+portantes_lof <- lof(scale(portantes_Fondo_Anomalias1), 10)
+
+outliers <- order(portantes_lof, decreasing=T)
+head(outliers)
+
+
+```
+La siguiente gráfica de densidad también nos ayuda a visualizar la distribución de datos en un intervalo de tiempo continuo. Este gráfico será una variación de un histograma.
+
+
+```{r echo=FALSE}
+plot(density(portantes_lof), main="Densidad")
+```
+
+##Datos anómalos significativos
+
+Se identifica cuales son los outliers con un nivel de significancia del 0.95% para posteriormente retirarlos  calculando previamente los cuantiles .
+
+```{r echo=FALSE}
+quantile(portantes_lof)
+thr = quantile(portantes_lof, .95)
+
+```
+La posición de cada uno de los outliers se presenta a continuación y son justificados debido al umbral que se escogió ( un valor mayor que el cuarto cuantil).
+```{r}
+out_index=which(portantes_lof>= thr)
+out_index
+```
+
+La siguiente gráfica nos muestra los outliers representados por color rojo partiendo del cálculo de lo LOF para k=5 vecinos por instancia.
+
+
+```{r echo=FALSE}
+# Cargamos la librería
+
+# Calculamos LOF para k=3 vecinos por instancia
+portantes_Fondo_Anomalias$score<-lof(portantes_Fondo_Anomalias, k=5)
+#str(portantes_Fondo_Anomalias)
+umbral<-4
+portantes_Fondo_Anomalias$outlier <- (portantes_Fondo_Anomalias$score>umbral)
+portantes_Fondo_Anomalias <- na.omit(portantes_Fondo_Anomalias)
+
+portantes_Fondo_Anomalias$color <- ifelse(portantes_Fondo_Anomalias$outlier, "red", "black")
+
+scatterplot3d(portantes_Fondo_Anomalias$REMUNERACION_MES,portantes_Fondo_Anomalias$PC_APORTE,portantes_Fondo_Anomalias$años, main="OUTLIERS", xlab = "Remuneración mensual", ylab = "Pc aporte",zlab = "Año",color = portantes_Fondo_Anomalias$color)
+
+```
+
+##LOF vs KNN
+
+Con nuestra base datos escalada primero se calcula y se agrega la distancia KNN como una nueva columna. Luego se calcula y se agrega LOF como una nueva columna para finalmente encontrar la ubicación de la fila del KNN y LOF más alto .
+
+Se concluye que mediante LOF Y KNN se obtiene el mismo valor $233$
+
+
+```{r echo=FALSE}
+portantes_scaled <- scale(portantes_Fondo_Anomalias1)
+
+# Calculate and append kNN distance as a new column
+portantes_nn <- get.knn(portantes_scaled, k = 10)
+portantes_Fondo_Anomalias1$score_knn <- rowMeans(portantes_nn$nn.dist)
+```
+
+```{r echo=FALSE}
+# Calculate and append LOF as a new column
+portantes_Fondo_Anomalias1$score_lof <- lof(portantes_scaled, k = 10)
+```
+
+```{r echo=FALSE}
+# Find the row location of highest kNN
+which.max(portantes_Fondo_Anomalias1$score_knn)
+```
+
+```{r echo=FALSE}
+# Find the row location of highest LOF
+which.max(portantes_Fondo_Anomalias1$score_lof)
+```
+
+
+
+
+
+
+
+
+###Ruidos
+
+Se obtiene una gráfica y un boxplot por cada variable para identificar los outliers.
+
+```{r echo=FALSE}
+par(mfrow=c(1,2))
+plot(sort(portantes_Fondo_Anomalias$REMUNERACION_MES, decreasing = FALSE))
+plot(sort(portantes_Fondo_Anomalias$PC_APORTE, decreasing = FALSE))
+plot(sort(portantes_Fondo_Anomalias$años, decreasing = FALSE) )
+```
+
+
+
+
